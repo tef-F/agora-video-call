@@ -11,6 +11,10 @@ const TOKEN =
 const CHANNEL = 'random-call';
 
 AgoraRTC.setLogLevel(4);
+AgoraRTC.setArea({
+  areaCode:"GLOBAL",
+  excludedArea:"CHINA"
+})
 
 let agoraCommandQueue = Promise.resolve();
 
