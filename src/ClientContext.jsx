@@ -50,9 +50,9 @@ const ContextProvider = ({ children }) => {
                     if (mediaType === 'video') {
                         onVideoTrack(user);
                     }
-                    // if (mediaType === 'audio') {
-                    //     user.audioTrack.play();
-                    // }
+                    if (mediaType === 'audio') {
+                        user.audioTrack.play();
+                    }
                 });
             });
 
