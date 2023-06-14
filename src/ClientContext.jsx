@@ -4,10 +4,11 @@ import AgoraRTC, { createClient } from 'agora-rtc-sdk-ng';
 const ClientContext = createContext();
 const APP_ID = '7db223eb737244e9abdc22226cf7e49c';
 const TOKEN =
-    '007eJxTYDix9fLrGb8Nu99p+ZxjkpBbEpDONEn8dY157gd/lei5uYwKDOYpSUZGxqlJ5sbmRiYmqZaJSSnJRkBglpxmnmpimfz2VmtKQyAjw5TCJhZGBggE8bkZihLzUvJzdZMTc3IYGAA3WiI4';
+    '007eJxTYGDVvC/d7COY8m/hX0lu6SBX6wT7K3dKtaLmHPQpTp59978Cg3lKkpGRcWqSubG5kYlJqmViUkqyERCYJaeZp5pYJpsadqY0BDIyvGnrYWVkgEAQn5uhKDEvJT9XNzkxJ4eBAQCpfiDc';
 
 const CHANNEL = 'random-call';
 const ContextProvider = ({ children }) => {
+    const [fullRoom, setFullRoom] = useState(false);
     AgoraRTC.setLogLevel(4);
     AgoraRTC.setArea({
         areaCode: 'GLOBAL',
@@ -21,13 +22,15 @@ const ContextProvider = ({ children }) => {
         localVideoTrack: null,
     });
 
-    const createAgoraClient = ({ onVideoTrack, onUserDisconnected }) => {
+    const createAgoraClient = ({
+        onVideoTrack,
+        onUserDisconnected,
+        onUserVideoUnpublished,
+    }) => {
         rtc.client = createClient({
             mode: 'rtc',
             codec: 'vp8',
         });
-
-        let trackVideo, trackAudio;
 
         const waitForConnectionState = (connectionState) => {
             return new Promise((resolve) => {
@@ -36,7 +39,7 @@ const ContextProvider = ({ children }) => {
                         clearInterval(interval);
                         resolve();
                     }
-                }, 200);
+                }, 300);
             });
         };
 
@@ -44,22 +47,44 @@ const ContextProvider = ({ children }) => {
             await waitForConnectionState('DISCONNECTED');
 
             const uid = await rtc.client.join(APP_ID, CHANNEL, TOKEN, null);
-
+            setUid(uid);
+            localStorage.setItem('meId', uid);
             rtc.client.on('user-published', (user, mediaType) => {
-                rtc.client.subscribe(user, mediaType).then(() => {
-                    if (mediaType === 'video') {
-                        onVideoTrack(user);
-                    }
-                    if (mediaType === 'audio') {
-                        user.audioTrack.play();
-                    }
-                });
+                if (rtc.client._users.length > 2) {
+                    setFullRoom(true);
+                    rtc.client.leave();
+                    // } else if(rtc.client._users.length  = 1) {
+                    //     rtc.client.subscribe(user, mediaType).then(() => {
+                    //         if (mediaType === 'video') {
+                    //             onVideoTrack(user);
+                    //         }
+                    //         if (mediaType === 'audio') {
+                    //             user.audioTrack.play();
+                    //         }
+                    //     });
+                } else {
+                    setFullRoom(false);
+                    rtc.client.subscribe(user, mediaType).then(() => {
+                        if (mediaType === 'video') {
+                            onVideoTrack(user);
+                        }
+                        if (mediaType === 'audio') {
+                            user.audioTrack.play();
+                        }
+                    });
+                }
             });
+
+            // rtc.client.on('user-unpublished', (user, mediaType) => {
+            //     if (mediaType === 'video') {
+            //         onUserVideoUnpublished(user);
+            //     }
+            // });
 
             rtc.client.on('user-left', (user) => {
                 onUserDisconnected(user);
             });
-
+            await AgoraRTC.createMicrophoneAndCameraTracks();
             rtc.localVideoTrack = await AgoraRTC.createCameraVideoTrack();
             rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
 
@@ -76,10 +101,6 @@ const ContextProvider = ({ children }) => {
         const disconnect = async () => {
             await waitForConnectionState('CONNECTED');
             rtc.client.removeAllListeners();
-            // for (let track of tracks) {
-            //     track.stop();
-            //     track.close();
-            // }
             rtc.localVideoTrack.stop();
             rtc.localVideoTrack.close();
             rtc.localAudioTrack.stop();
@@ -88,6 +109,7 @@ const ContextProvider = ({ children }) => {
                 rtc.localVideoTrack,
                 rtc.localAudioTrack,
             ]);
+            setFullRoom(false);
             await rtc.client.leave();
             setRtc(null);
         };
@@ -97,31 +119,22 @@ const ContextProvider = ({ children }) => {
             connect,
         };
     };
-
-    console.log(rtc);
-
-    const stopAudio = async () => {
-        console.log('Stop', rtc.localAudioTrack);
-        rtc.localAudioTrack.close();
-        await rtc.client.unpublish(rtc.localAudioTrack);
+    const removeUserFromRoom = (uid) => {
+        setUsers((prevUsers) => {
+            prevUsers.map((u) => {
+                if (u.uid === uid) {
+                    return {
+                        ...u,
+                        videoTrack: null,
+                        audioTrack: null, // Đặt videoTrack của người dùng là null để hiển thị màn hình trống
+                    };
+                }
+            });
+            return prevUsers.filter((u) => u.uid !== uid);
+        });
     };
 
-    const startAudio = async () => {
-        rtc.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
-        await rtc.client.publish(rtc.localAudioTrack);
-    };
-
-    const stopVideo = () => {
-        rtc.localVideoTrack.close();
-        rtc.client.unpublish(rtc.localVideoTrack);
-    };
-    const startVideo = async () => {
-        // me.classList.add('connecting');
-        rtc.localVideoTrack = await AgoraRTC.createCameraVideoTrack();
-        rtc.client.publish(rtc.localVideoTrack);
-        // rtc.localVideoTrack.play('me');
-    };
-
+    // console.log(rtc);
     const [users, setUsers] = useState([]);
     const [uid, setUid] = useState(null);
 
@@ -134,17 +147,34 @@ const ContextProvider = ({ children }) => {
             setUsers((previousUsers) =>
                 previousUsers.filter((u) => u.uid !== user.uid),
             );
+            // user.videoTrack.close();
+            // user.audioTrack.close();
+        };
+
+        const onUserVideoUnpublished = (user) => {
+            setUsers((previousUsers) =>
+                previousUsers.map((u) => {
+                    if (u.uid === user.uid) {
+                        return {
+                            ...u,
+                            videoTrack: null,
+                            audioTrack: null, // Đặt videoTrack của người dùng là null để hiển thị màn hình trống
+                        };
+                    }
+                    return u;
+                }),
+            );
         };
 
         const { connect, disconnect } = createAgoraClient({
             onVideoTrack,
             onUserDisconnected,
+            onUserVideoUnpublished,
         });
 
         const setup = async () => {
             const { rtc, uid } = await connect();
             setUid(uid);
-            localStorage.setItem('meId', uid);
             setUsers((previousUsers) => [
                 ...previousUsers,
                 {
@@ -156,9 +186,11 @@ const ContextProvider = ({ children }) => {
         };
 
         const cleanup = async () => {
+            localStorage.setItem('meId', '');
             await disconnect();
-            setUid(null);
-            setUsers([]);
+            setFullRoom(false);
+            // setUid(null);
+            // setUsers([]);
         };
 
         // setup();
@@ -169,15 +201,36 @@ const ContextProvider = ({ children }) => {
             agoraCommandQueue = agoraCommandQueue.then(cleanup);
         };
     }, []);
+
+    const handleDisconnect = async () => {
+        rtc.client.leave();
+        rtc.client.removeAllListeners();
+        rtc.localVideoTrack.stop();
+        rtc.localVideoTrack.close();
+        rtc.localAudioTrack.stop();
+        rtc.localAudioTrack.close();
+        await rtc.client.unpublish([rtc.localVideoTrack, rtc.localAudioTrack]);
+        await rtc.client.leave();
+        setRtc({
+            client: null,
+            localAudioTrack: null,
+            localVideoTrack: null,
+        });
+    };
+
+    // console.log(" A", remoteVideoTracks);
+    // console.log(" B", myVideoTrack);
+    console.log('uid - context', uid);
+    
     return (
         <ClientContext.Provider
             value={{
+                uid,
                 users,
                 createAgoraClient,
-                stopAudio,
-                startAudio,
-                stopVideo,
-                startVideo,
+                handleDisconnect,
+                fullRoom,
+                removeUserFromRoom,
             }}
         >
             {children}
